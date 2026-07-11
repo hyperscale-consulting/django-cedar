@@ -50,6 +50,12 @@ class TestProviderChecks:
         ]
         assert "django_cedar.E005" in _error_ids(check_cedar_config(None))
 
+    def test_string_setting_produces_single_e006(self, settings):
+        # A bare string is iterable per-character; without a guard this would
+        # emit one E004 per character.
+        settings.CEDAR_CONTEXT_PROVIDERS = "tests.providers.SelfSignupContext"
+        assert _error_ids(check_cedar_config(None)) == ["django_cedar.E006"]
+
     def test_valid_providers_pass(self, settings):
         settings.CEDAR_PRINCIPAL_ATTRIBUTE_PROVIDERS = ["tests.providers.StaticAttrs"]
         settings.CEDAR_CONTEXT_PROVIDERS = ["tests.providers.SelfSignupContext"]

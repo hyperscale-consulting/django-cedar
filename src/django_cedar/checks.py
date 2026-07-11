@@ -60,7 +60,16 @@ def _check_policy_file() -> list[CheckMessage]:
 def _check_providers() -> list[CheckMessage]:
     errors: list[CheckMessage] = []
     for setting_name, required_method in _PROVIDER_SETTINGS:
-        for dotted_path in getattr(settings, setting_name, []):
+        configured = getattr(settings, setting_name, [])
+        if not isinstance(configured, (list, tuple)):
+            errors.append(
+                Error(
+                    f"{setting_name} must be a list or tuple.",
+                    id="django_cedar.E006",
+                )
+            )
+            continue
+        for dotted_path in configured:
             try:
                 provider_cls = import_from_path(dotted_path)
             except (ImportError, ImproperlyConfigured) as e:

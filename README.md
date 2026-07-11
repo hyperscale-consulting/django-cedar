@@ -12,6 +12,10 @@ those policies with class-based-view mixins.
 - Python 3.12+
 - Django 5.2+
 
+Your user model must subclass
+`django.contrib.auth.models.AbstractUser`. The Cedar principal type is always
+`User`, regardless of the model's class name.
+
 ## Installation
 
 ```bash
@@ -149,8 +153,9 @@ authz.authorize(request.user, "ExportReport", report)  # raises PermissionDenied
 
 With `django_cedar` in `INSTALLED_APPS`, `manage.py check` (and every server
 start) verifies that `CEDAR_POLICY_PATH` is set and the file exists
-(`django_cedar.E001`/`E002`), that it parses as Cedar (`E003`), and that all
-configured providers import and have the right methods (`E004`/`E005`).
+(`django_cedar.E001`/`E002`), that it parses as Cedar (`E003`), that the
+provider settings are lists or tuples (`E006`), and that all configured
+providers import and have the right methods (`E004`/`E005`).
 
 ## License
 
