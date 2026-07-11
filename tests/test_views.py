@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -242,7 +243,7 @@ class TestCurrentUserScopedMixin:
         class ConcreteScoped(CurrentUserScopedMixin, ListView):
             model = None
 
-        view = ConcreteScoped()
+        view: Any = ConcreteScoped()
         view.request = MagicMock()
         view.request.user = user
         view.queryset = mock_qs
@@ -257,7 +258,7 @@ class TestCurrentUserScopedMixin:
         class ConcreteScoped(CurrentUserScopedMixin, ListView):
             model = None
 
-        view = ConcreteScoped()
+        view: Any = ConcreteScoped()
         view.request = MagicMock()
         view.request.user = _make_anon_user()
         view.queryset = mock_qs
