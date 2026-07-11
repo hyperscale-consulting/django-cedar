@@ -17,7 +17,7 @@ PERMIT_ALL = "permit(principal, action, resource);"
 DENY_ALL = "forbid(principal, action, resource);"
 
 
-def _make_mock_user(pk=1, is_staff=False, is_superuser=False, groups=None):
+def _make_mock_user(pk: Any = 1, is_staff=False, is_superuser=False, groups=None):
     user = MagicMock()
     user.pk = pk
     user.is_authenticated = True
@@ -27,7 +27,7 @@ def _make_mock_user(pk=1, is_staff=False, is_superuser=False, groups=None):
     return user
 
 
-def _make_mock_resource(class_name, pk=1) -> Any:
+def _make_mock_resource(class_name, pk: Any = 1) -> Any:
     """Create a mock resource that isn't an AbstractUser and has a proper class name."""
 
     class FakeModel:
@@ -141,6 +141,37 @@ class _StaticContextProvider:
 
     def get_context(self, user, action, resource):
         return self._context
+
+
+class TestCedarUidEscaping:
+    def test_resource_pk_with_quote_authorizes(self):
+        # pk contains a double quote; the request string must escape it so the
+        # policy's escaped literal matches.
+        policy = r'permit(principal, action, resource == Widget::"wid\"get");'
+        authz = Authz(policies=policy)
+        user = _make_mock_user()
+        resource = _make_mock_resource("Widget", pk='wid"get')
+        authz.authorize(user, "DoSomething", resource)
+
+    def test_resource_pk_with_backslash_authorizes(self):
+        # pk contains a backslash; both the request string and the policy
+        # literal escape it.
+        policy = r'permit(principal, action, resource == Widget::"wid\\get");'
+        authz = Authz(policies=policy)
+        user = _make_mock_user()
+        resource = _make_mock_resource("Widget", pk="wid\\get")
+        authz.authorize(user, "DoSomething", resource)
+
+    def test_action_name_with_quote_does_not_crash(self):
+        authz = Authz(policies=PERMIT_ALL)
+        user = _make_mock_user()
+        authz.authorize(user, 'Do"Something', None)
+
+    def test_user_pk_with_quote_authorizes(self):
+        policy = r'permit(principal == User::"u\"id", action, resource);'
+        authz = Authz(policies=policy)
+        user = _make_mock_user(pk='u"id')
+        authz.authorize(user, "DoSomething", None)
 
 
 class TestContextProviders:
@@ -260,6 +291,15 @@ class TestMakeEntities:
         entities = _make_entities(resource, principal_attribute_providers=[])
         types = {e.ref.type for e in entities}
         assert types == {"Report", "Org"}
+
+    def test_cyclic_related_entities_no_recursion_error(self):
+        a = _make_mock_resource("Report", pk=1)
+        b = _make_mock_resource("Org", pk=2)
+        a.authz_related_entities = lambda: [b]
+        b.authz_related_entities = lambda: [a]
+        entities = _make_entities(a, principal_attribute_providers=[])
+        refs = {(e.ref.type, e.ref.id) for e in entities}
+        assert refs == {("Report", "1"), ("Org", "2")}
 
 
 class TestEntityRef:

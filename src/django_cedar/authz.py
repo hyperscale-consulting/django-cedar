@@ -23,6 +23,18 @@ from django.db.models import Model as DjangoModel
 logger = logging.getLogger(__name__)
 
 
+def _cedar_uid(entity_type: str, entity_id: str) -> str:
+    """Build a Cedar entity UID string with the id safely escaped.
+
+    Cedar string literals use ``\\`` and ``"`` as escape characters, so an id
+    containing either would otherwise produce a malformed request string.
+    Only the request string is escaped; the entity dicts keep RAW ids because
+    cedarpy unescapes the request string before matching.
+    """
+    escaped = entity_id.replace("\\", "\\\\").replace('"', '\\"')
+    return f'{entity_type}::"{escaped}"'
+
+
 def _resolve_policy_path() -> Path:
     raw = settings.CEDAR_POLICY_PATH
     p = Path(raw).expanduser()
@@ -49,7 +61,7 @@ def import_from_path(path: str):
         module_path, attr = path.rsplit(".", 1)
     except ValueError as e:
         raise ImproperlyConfigured(
-            f"Invalid contributor path '{path}'. Expected 'some.module.ClassName'."
+            f"Invalid provider path '{path}'. Expected 'some.module.ClassName'."
         ) from e
 
     module = importlib.import_module(module_path)
@@ -57,8 +69,7 @@ def import_from_path(path: str):
         return getattr(module, attr)
     except AttributeError as e:
         raise ImproperlyConfigured(
-            f"Contributor '{path}' not found (no attribute '{attr}' in "
-            f"'{module_path}')."
+            f"Provider '{path}' not found (no attribute '{attr}' in '{module_path}')."
         ) from e
 
 
@@ -135,12 +146,13 @@ class Authz:
         entity_dicts = [e.to_dict() for e in entities]
         cedar_resource = (
             resource
-            and f'{type(resource).__name__}::"{resource.pk}"'
+            and _cedar_uid(type(resource).__name__, str(resource.pk))
             or 'System::"global"'
         )
         principal = 'Anonymous::"guest"'
         if user and user.is_authenticated:
-            principal = f'User::"{str(user.pk)}"'
+            principal = _cedar_uid("User", str(user.pk))
+        cedar_action = _cedar_uid("Action", action)
         cedar_context: dict[str, Any] = {}
         for provider in self.context_providers:
             _deep_merge(cedar_context, provider.get_context(user, action, resource))
@@ -148,7 +160,7 @@ class Authz:
             _deep_merge(cedar_context, context)
         authz_request = dict(
             principal=principal,
-            action=f'Action::"{action}"',
+            action=cedar_action,
             resource=cedar_resource,
             context=cedar_context,
         )
@@ -157,7 +169,10 @@ class Authz:
         authz_result = is_authorized(authz_request, self.policies, entity_dicts)
         if not authz_result.allowed:
             logger.debug(f"AuthzResult errors: {authz_result.diagnostics.errors}")
-            logger.info(f"Authz denied: {authz_request}")
+            logger.info(
+                f"Authz denied: principal={principal} action={cedar_action} "
+                f"resource={cedar_resource}"
+            )
             raise PermissionDenied("Forbidden")
 
 
@@ -198,6 +213,7 @@ def _make_user_entities(
     user: AbstractUser, principal_attribute_providers: list[Any]
 ) -> set[Entity]:
     user_groups: Any = user.groups
+    groups = list(user_groups.all())
     result = set()
     attrs = {
         "id": str(user.pk),
@@ -213,10 +229,10 @@ def _make_user_entities(
         Entity(
             EntityRef("User", str(user.pk)),
             attrs=attrs,
-            parents={EntityRef("Group", group.name) for group in user_groups.all()},
+            parents={EntityRef("Group", group.name) for group in groups},
         )
     )
-    for group in user_groups.all():
+    for group in groups:
         result.add(
             Entity(
                 EntityRef("Group", group.name),
@@ -236,10 +252,20 @@ def _make_principal_entities(
 
 
 def _make_entities(
-    entity: Any, principal_attribute_providers: list[Any]
+    entity: Any,
+    principal_attribute_providers: list[Any],
+    seen: set[EntityRef] | None = None,
 ) -> set[Entity]:
     if isinstance(entity, AbstractUser):
         return _make_principal_entities(entity, principal_attribute_providers)
+
+    if seen is None:
+        seen = set()
+
+    ref = EntityRef(type(entity).__name__, str(entity.pk))
+    if ref in seen:
+        return set()
+    seen.add(ref)
 
     result = set()
 
@@ -249,20 +275,17 @@ def _make_entities(
         attrs = cast("dict[str, Any]", authz_fields())
 
     attrs["id"] = str(entity.pk)
-    result.add(
-        Entity(
-            EntityRef(type(entity).__name__, str(entity.pk)),
-            attrs=attrs,
-        )
-    )
+    result.add(Entity(ref, attrs=attrs))
 
     # Transitively include any entities the model declares as related so Cedar
     # can resolve `resource.foo.bar` attribute chains. Models opt in by
     # defining `authz_related_entities()` → iterable of related Django models.
+    # ``seen`` guards against cycles (A → B → A) that would otherwise recurse
+    # unboundedly.
     related_fn = getattr(entity, "authz_related_entities", None)
     if callable(related_fn):
         for related in cast("Iterable[Any]", related_fn() or ()):
-            result.update(_make_entities(related, principal_attribute_providers))
+            result.update(_make_entities(related, principal_attribute_providers, seen))
 
     return result
 
