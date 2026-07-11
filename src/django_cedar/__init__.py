@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import importlib
 from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from django_cedar.authz import Authz
+    from django_cedar.authz import create_authz
+    from django_cedar.authz import Entity
+    from django_cedar.authz import EntityRef
 
 __all__: list[str] = ["Authz", "Entity", "EntityRef", "create_authz"]
 
