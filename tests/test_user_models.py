@@ -78,3 +78,17 @@ class TestBareUserModel:
         policy = "permit(principal is Device, action, resource);"
         authz = Authz(policies=policy)
         authz.authorize(Device(pk=11), "Ping", None)
+
+    def test_provider_attributes_included_for_bare_model(self, settings):
+        settings.AUTH_USER_MODEL = "tests.Device"
+        policy = """
+        permit(principal, action, resource)
+        when { principal.role == "admin" };
+        """
+
+        class RoleProvider:
+            def get_attributes(self, user):
+                return {"role": "admin"}
+
+        authz = Authz(policies=policy, principal_attribute_providers=[RoleProvider()])
+        authz.authorize(Device(pk=11), "Ping", None)

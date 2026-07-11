@@ -42,7 +42,7 @@ with how resources are named.
    passed as a resource (e.g. `CurrentUserScopedMixin`) produces matching
    types in the request string and the entity store.
 6. **Type hints**: `AbstractUser` hints at the public boundaries loosen to
-   `AbstractBaseUser | Any` (project's established pyright idiom: targeted
+   `AbstractBaseUser | None` (project's established pyright idiom: targeted
    `Any`/`cast` at dynamic Django boundaries; no django-stubs, no
    type: ignore).
 

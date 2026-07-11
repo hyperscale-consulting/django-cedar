@@ -69,10 +69,15 @@ class WidgetDetailView(AuthorizedDetailView):
 
 Every request is authorized in `dispatch()`. The Cedar request is built as:
 
-- **principal** — `User::"<pk>"` for authenticated users, `Anonymous::"guest"`
-  otherwise. User entities carry `id`, `is_staff` and `is_superuser`
-  attributes, and the user's Django groups become parent entities
-  (`Group::"<name>"`), so `principal in Group::"editors"` works out of the box.
+- **principal** — `<UserModel>::"<pk>"` for authenticated users, where
+  `<UserModel>` is your user model's class name via `get_user_model()`
+  (`User::"<pk>"` with Django's default user model), or `Anonymous::"guest"`
+  otherwise. The `id` attribute is always included; `is_staff` and
+  `is_superuser` attributes and `Group::"<name>"` parent entities from your
+  model's `groups` relation are included when your model provides them, so
+  `principal in Group::"editors"` works out of the box for models that have
+  one. Policies — including `forbid` policies — that reference an attribute
+  your model doesn't provide never apply.
 - **action** — `Action::"<name>"` from the view's `action_names` mapping
   (HTTP method → action name). HEAD requests are authorized using the view's
   `"GET"` action mapping; a `"HEAD"` key in `action_names` is not consulted.
