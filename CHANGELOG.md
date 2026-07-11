@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - TBD
+
+### Changed
+
+- The Cedar principal type is now the user model's class name via
+  `get_user_model()` (previously hardcoded `User`). Breaking only for
+  projects with a custom user model — where 0.1.x principal/resource
+  naming was inconsistent — and a no-op for projects using Django's
+  default `User`.
+- `is_staff`/`is_superuser` principal attributes and `Group` parent
+  entities are now capability-detected, so user models without them
+  (e.g. bare `AbstractBaseUser`) are supported.
+
 ## [0.1.0] - 2026-07-11
 
 ### Added

@@ -12,9 +12,12 @@ those policies with class-based-view mixins.
 - Python 3.12+
 - Django 5.2+
 
-Your user model must subclass
-`django.contrib.auth.models.AbstractUser`. The Cedar principal type is always
-`User`, regardless of the model's class name.
+Any user model works, including custom `AUTH_USER_MODEL` classes. The Cedar
+principal type is your user model's class name (e.g. `Member::"5"` for a
+`Member` model; `User::"5"` with Django's default model). The `is_staff` and
+`is_superuser` attributes and `Group` parent entities are included when your
+model provides them — a bare `AbstractBaseUser` model gets just `id` plus any
+provider-supplied attributes.
 
 ## Installation
 
