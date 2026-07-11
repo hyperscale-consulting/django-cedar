@@ -32,6 +32,7 @@ Issues = "https://github.com/hyperscale-consulting/django-cedar/issues"
 
 [dependency-groups]
 dev = [
+    "django-stubs>=6.0.0",
     "pyright>=1.1.400",
     "pytest>=8.0",
     "pytest-cov>=6.0",
