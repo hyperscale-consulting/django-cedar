@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
+from typing import cast
 
 from cedarpy import is_authorized
 from django.contrib.auth.models import AbstractUser
@@ -106,6 +108,7 @@ class Entity:
 def _make_user_entities(
     user: AbstractUser, principal_attribute_providers: list[Any]
 ) -> set[Entity]:
+    user_groups: Any = user.groups
     result = set()
     attrs = {
         "id": str(user.pk),
@@ -121,10 +124,10 @@ def _make_user_entities(
         Entity(
             EntityRef("User", str(user.pk)),
             attrs=attrs,
-            parents={EntityRef("Group", group.name) for group in user.groups.all()},
+            parents={EntityRef("Group", group.name) for group in user_groups.all()},
         )
     )
-    for group in user.groups.all():
+    for group in user_groups.all():
         result.add(
             Entity(
                 EntityRef("Group", group.name),
@@ -154,7 +157,7 @@ def _make_entities(
     attrs: dict[str, Any] = {}
     authz_fields = getattr(entity, "authz_fields", None)
     if callable(authz_fields):
-        attrs = authz_fields()  # type: ignore[assignment]
+        attrs = cast("dict[str, Any]", authz_fields())
 
     attrs["id"] = str(entity.pk)
     result.add(
@@ -169,7 +172,7 @@ def _make_entities(
     # defining `authz_related_entities()` → iterable of related Django models.
     related_fn = getattr(entity, "authz_related_entities", None)
     if callable(related_fn):
-        for related in related_fn() or ():  # type: ignore[union-attr]
+        for related in cast("Iterable[Any]", related_fn() or ()):
             result.update(_make_entities(related, principal_attribute_providers))
 
     return result

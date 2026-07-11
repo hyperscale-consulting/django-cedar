@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -26,15 +27,15 @@ def _make_mock_user(pk=1, is_staff=False, is_superuser=False, groups=None):
     return user
 
 
-def _make_mock_resource(class_name, pk=1):
+def _make_mock_resource(class_name, pk=1) -> Any:
     """Create a mock resource that isn't an AbstractUser and has a proper class name."""
 
     class FakeModel:
         pass
 
     FakeModel.__name__ = class_name
-    obj = FakeModel()
-    obj.pk = pk  # type: ignore[attr-defined]
+    obj: Any = FakeModel()
+    obj.pk = pk
     return obj
 
 
@@ -92,7 +93,7 @@ class TestAuthzAuthorize:
         user = _make_mock_user()
 
         resource = _make_mock_resource("Widget", pk=7)
-        authz.authorize(user, "DoSomething", resource)  # type: ignore[arg-type]
+        authz.authorize(user, "DoSomething", resource)
 
     def test_action_name_formatted_correctly(self):
         policy = 'permit(principal, action == Action::"ViewWidget", resource);'
@@ -170,7 +171,7 @@ class TestContextProviders:
         first = _StaticContextProvider({"stage": "first"})
         second = _StaticContextProvider({"stage": "second"})
         authz = Authz(policies=policy, context_providers=[first, second])
-        authz.authorize(_make_mock_user(), "DoSomething", None)  # type: ignore[arg-type]
+        authz.authorize(_make_mock_user(), "DoSomething", None)
 
     def test_call_context_wins_over_providers(self):
         policy = """
@@ -189,7 +190,7 @@ class TestContextProviders:
         authz = Authz(policies=PERMIT_ALL, context_providers=[provider])
         user = _make_mock_user()
         resource = _make_mock_resource("Widget", pk=3)
-        authz.authorize(user, "DoSomething", resource)  # type: ignore[arg-type]
+        authz.authorize(user, "DoSomething", resource)
         provider.get_context.assert_called_once_with(user, "DoSomething", resource)
 
 
@@ -245,7 +246,7 @@ class TestMakeEntities:
 
     def test_model_with_authz_fields(self):
         resource = _make_mock_resource("Report", pk=1)
-        resource.authz_fields = lambda: {"status": "draft", "org_id": "99"}  # type: ignore[attr-defined]
+        resource.authz_fields = lambda: {"status": "draft", "org_id": "99"}
         entities = _make_entities(resource, principal_attribute_providers=[])
         entity_list = list(entities)
         assert entity_list[0].attrs["status"] == "draft"
@@ -255,7 +256,7 @@ class TestMakeEntities:
     def test_related_entities_included_transitively(self):
         related = _make_mock_resource("Org", pk=9)
         resource = _make_mock_resource("Report", pk=1)
-        resource.authz_related_entities = lambda: [related]  # type: ignore[attr-defined]
+        resource.authz_related_entities = lambda: [related]
         entities = _make_entities(resource, principal_attribute_providers=[])
         types = {e.ref.type for e in entities}
         assert types == {"Report", "Org"}
