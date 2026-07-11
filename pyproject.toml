@@ -1,0 +1,74 @@
+[project]
+name = "django-cedar"
+version = "0.1.0"
+description = "Cedar policy-based authorization for Django"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Andy Caine", email = "andy@hyperscale.consulting" }]
+requires-python = ">=3.12"
+dependencies = [
+    "cedarpy>=4.8.1",
+    "django>=5.2",
+]
+keywords = ["django", "cedar", "authorization", "authz", "policy"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
+
+[project.urls]
+Homepage = "https://github.com/hyperscale-consulting/django-cedar"
+Changelog = "https://github.com/hyperscale-consulting/django-cedar/blob/main/CHANGELOG.md"
+Issues = "https://github.com/hyperscale-consulting/django-cedar/issues"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.400",
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    "pytest-django>=4.9",
+    "ruff>=0.15.21",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<1.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+fix = true
+show-fixes = true
+output-format = "full"
+
+[tool.ruff.lint]
+select = [
+    "B",  # flake8-bugbear
+    "E",  # pycodestyle error
+    "F",  # pyflakes
+    "I",  # isort
+    "UP",  # pyupgrade
+    "W",  # pycodestyle warning
+]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+order-by-type = false
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+testpaths = ["tests"]
