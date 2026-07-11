@@ -14,7 +14,8 @@ from typing import cast
 
 from cedarpy import is_authorized
 from django.conf import settings
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth import get_user_model
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import PermissionDenied
 from django.core.signals import setting_changed
@@ -33,6 +34,16 @@ def _cedar_uid(entity_type: str, entity_id: str) -> str:
     """
     escaped = entity_id.replace("\\", "\\\\").replace('"', '\\"')
     return f'{entity_type}::"{escaped}"'
+
+
+def _principal_type() -> str:
+    return get_user_model().__name__
+
+
+def _entity_type(obj: Any) -> str:
+    if isinstance(obj, get_user_model()):
+        return _principal_type()
+    return type(obj).__name__
 
 
 def _resolve_policy_path() -> Path:
@@ -130,7 +141,7 @@ class Authz:
 
     def authorize(
         self,
-        user: AbstractUser | None,
+        user: AbstractBaseUser | None,
         action: str,
         resource: DjangoModel | None,
         *,
@@ -146,12 +157,12 @@ class Authz:
         entity_dicts = [e.to_dict() for e in entities]
         cedar_resource = (
             resource
-            and _cedar_uid(type(resource).__name__, str(resource.pk))
+            and _cedar_uid(_entity_type(resource), str(resource.pk))
             or 'System::"global"'
         )
         principal = 'Anonymous::"guest"'
         if user and user.is_authenticated:
-            principal = _cedar_uid("User", str(user.pk))
+            principal = _cedar_uid(_principal_type(), str(user.pk))
         cedar_action = _cedar_uid("Action", action)
         cedar_context: dict[str, Any] = {}
         for provider in self.context_providers:
@@ -210,16 +221,15 @@ class Entity:
 
 
 def _make_user_entities(
-    user: AbstractUser, principal_attribute_providers: list[Any]
+    user: AbstractBaseUser, principal_attribute_providers: list[Any]
 ) -> set[Entity]:
-    user_groups: Any = user.groups
-    groups = list(user_groups.all())
+    user_groups: Any = getattr(user, "groups", None)
+    groups = list(user_groups.all()) if user_groups is not None else []
     result = set()
-    attrs = {
-        "id": str(user.pk),
-        "is_staff": user.is_staff,
-        "is_superuser": user.is_superuser,
-    }
+    attrs: dict[str, Any] = {"id": str(user.pk)}
+    for flag in ("is_staff", "is_superuser"):
+        if hasattr(user, flag):
+            attrs[flag] = getattr(user, flag)
     for provider in principal_attribute_providers:
         attrs.update(provider.get_attributes(user))
         if hasattr(provider, "get_entities"):
@@ -227,7 +237,7 @@ def _make_user_entities(
 
     result.add(
         Entity(
-            EntityRef("User", str(user.pk)),
+            EntityRef(_principal_type(), str(user.pk)),
             attrs=attrs,
             parents={EntityRef("Group", group.name) for group in groups},
         )
@@ -243,7 +253,7 @@ def _make_user_entities(
 
 
 def _make_principal_entities(
-    user: AbstractUser | None, principal_attribute_providers: list[Any]
+    user: AbstractBaseUser | None, principal_attribute_providers: list[Any]
 ) -> set[Entity]:
     if not user or not user.is_authenticated:
         return {Entity(EntityRef("Anonymous", "guest"))}
@@ -256,7 +266,7 @@ def _make_entities(
     principal_attribute_providers: list[Any],
     seen: set[EntityRef] | None = None,
 ) -> set[Entity]:
-    if isinstance(entity, AbstractUser):
+    if isinstance(entity, get_user_model()):
         return _make_principal_entities(entity, principal_attribute_providers)
 
     if seen is None:
