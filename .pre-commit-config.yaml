@@ -1,0 +1,19 @@
+repos:
+  # Keep in lockstep with the ruff version in uv.lock (uv lock --upgrade-package ruff).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 01a675ea018f2fb714478a5ffb83fcea8374bb06  # frozen: v0.15.21
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: d9fca3320346514799461a80b0753eb45d707d46  # frozen: 0.11.28
+    hooks:
+      - id: uv-lock
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: fix-byte-order-marker
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
