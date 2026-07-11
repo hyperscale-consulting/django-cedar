@@ -19,3 +19,19 @@ def test_import_without_django_settings():
         env=env,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_import_is_lazy():
+    """Importing the package must not pull in authz (which imports Django models)."""
+    env = {k: v for k, v in os.environ.items() if k != "DJANGO_SETTINGS_MODULE"}
+    code = (
+        "import sys; import django_cedar; "
+        "assert 'django_cedar.authz' not in sys.modules, 'authz imported eagerly'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
