@@ -58,8 +58,13 @@ class CedarAuthorizationMixin:
 
     def authorize_request(self, request) -> None:
         method = request.method.upper()
-        if method in ("OPTIONS", "HEAD"):
+        if method == "OPTIONS":
             return
+        # Django's View.setup() aliases head=get, so a HEAD request executes
+        # the full GET code path. Authorize it with the GET action rather than
+        # letting it bypass authorization.
+        if method == "HEAD":
+            method = "GET"
         action = self.action_names.get(method)
         if action is None:
             if hasattr(self, method.lower()):

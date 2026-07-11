@@ -7,9 +7,11 @@ from unittest.mock import patch
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
 from django.test import RequestFactory
 from django.views.generic import ListView
 from django.views.generic import TemplateView
+from django.views.generic import View
 
 from django_cedar.views import CedarAuthorizationMixin
 from django_cedar.views import CurrentUserScopedMixin
@@ -84,10 +86,30 @@ class TestCedarAuthorizationMixin:
         mock_create_authz.assert_not_called()
 
     @patch("django_cedar.views.create_authz")
-    def test_head_bypasses_authorization(self, mock_create_authz, rf):
+    def test_head_authorized_with_get_action(self, mock_create_authz, rf):
+        mock_authz = MagicMock()
+        mock_create_authz.return_value = mock_authz
+
         request = rf.head("/")
         request.user = _make_mock_user()
         _dispatch(SimpleAuthorizedView, request)
+
+        mock_authz.authorize.assert_called_once_with(request.user, "ViewPage", None)
+
+    @patch("django_cedar.views.create_authz")
+    def test_head_without_get_handler_skips_auth(self, mock_create_authz, rf):
+        # A view with no get handler has no GET action mapping and no get()
+        # to alias HEAD onto: HEAD stays a no-op (Django returns 405).
+        class PostOnlyView(CedarAuthorizationMixin, View):
+            action_names = {"POST": "UpdatePage"}
+
+            def post(self, request, *args, **kwargs):
+                return HttpResponse(b"ok")
+
+        request = rf.head("/")
+        request.user = _make_mock_user()
+        response = _dispatch(PostOnlyView, request)
+        assert response.status_code == 405
         mock_create_authz.assert_not_called()
 
     @patch("django_cedar.views.create_authz")
