@@ -112,6 +112,43 @@ class TestCedarAuthorizationMixin:
         assert response.status_code == 405
         mock_create_authz.assert_not_called()
 
+    def test_head_with_custom_head_handler_no_get_raises_improperly_configured(
+        self, rf
+    ):
+        # A view with a custom head() but no get() must not silently skip
+        # authorization: the fail-closed guard has to check for a *head*
+        # handler (the original request method), not a get handler (the
+        # translated action_names lookup method).
+        class HeadOnlyView(CedarAuthorizationMixin, View):
+            action_names: dict[str, str] = {}
+
+            def head(self, request, *args, **kwargs):
+                return HttpResponse(b"ok")
+
+        request = rf.head("/")
+        request.user = _make_mock_user()
+        with pytest.raises(ImproperlyConfigured, match="head.*handler.*action_names"):
+            _dispatch(HeadOnlyView, request)
+
+    @patch("django_cedar.views.create_authz")
+    def test_head_with_custom_head_handler_get_action_mapped(
+        self, mock_create_authz, rf
+    ):
+        mock_authz = MagicMock()
+        mock_create_authz.return_value = mock_authz
+
+        class HeadOnlyView(CedarAuthorizationMixin, View):
+            action_names = {"GET": "ViewPage"}
+
+            def head(self, request, *args, **kwargs):
+                return HttpResponse(b"ok")
+
+        request = rf.head("/")
+        request.user = _make_mock_user()
+        _dispatch(HeadOnlyView, request)
+
+        mock_authz.authorize.assert_called_once_with(request.user, "ViewPage", None)
+
     @patch("django_cedar.views.create_authz")
     def test_unmapped_method_without_handler_skips_auth_returns_405(
         self, mock_create_authz, rf

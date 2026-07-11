@@ -60,6 +60,12 @@ class CedarAuthorizationMixin:
         method = request.method.upper()
         if method == "OPTIONS":
             return
+        # Keep the original method's handler name for the fail-closed guard
+        # below: a view may define a custom head() with no get() at all, and
+        # that handler must still be caught by the guard even though the
+        # action_names lookup (just below) is done against the translated
+        # "GET" method.
+        handler_name = method.lower()
         # Django's View.setup() aliases head=get, so a HEAD request executes
         # the full GET code path. Authorize it with the GET action rather than
         # letting it bypass authorization.
@@ -67,9 +73,9 @@ class CedarAuthorizationMixin:
             method = "GET"
         action = self.action_names.get(method)
         if action is None:
-            if hasattr(self, method.lower()):
+            if hasattr(self, handler_name):
                 raise ImproperlyConfigured(
-                    f"{type(self).__name__} has a {method.lower()}() handler but no "
+                    f"{type(self).__name__} has a {handler_name}() handler but no "
                     f"action_names entry for '{method}'. Add "
                     f"action_names['{method}'] to enable Cedar authorization "
                     f"for this method."

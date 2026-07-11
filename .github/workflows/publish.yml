@@ -20,7 +20,7 @@ jobs:
           enable-cache: false
       - name: Check tag matches package version
         run: |
-          version=$(uvx --from toml-cli toml get --toml-path pyproject.toml project.version)
+          version=$(uvx --from toml-cli==0.8.2 toml get --toml-path pyproject.toml project.version)
           test "v${version}" = "${GITHUB_REF_NAME}"
       - run: uv build
       - run: uvx twine==6.2.0 check dist/*

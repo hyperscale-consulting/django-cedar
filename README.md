@@ -71,7 +71,8 @@ Every request is authorized in `dispatch()`. The Cedar request is built as:
   attributes, and the user's Django groups become parent entities
   (`Group::"<name>"`), so `principal in Group::"editors"` works out of the box.
 - **action** — `Action::"<name>"` from the view's `action_names` mapping
-  (HTTP method → action name).
+  (HTTP method → action name). HEAD requests are authorized using the view's
+  `"GET"` action mapping; a `"HEAD"` key in `action_names` is not consulted.
 - **resource** — the object returned by the view's `get_resource()` hook, as
   `<ModelClass>::"<pk>"`; `System::"global"` when there is no resource.
 
