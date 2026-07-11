@@ -1,20 +1,109 @@
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 from collections.abc import Iterable
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 from typing import cast
 
 from cedarpy import is_authorized
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import PermissionDenied
+from django.core.signals import setting_changed
 from django.db.models import Model as DjangoModel
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_policy_path() -> Path:
+    raw = settings.CEDAR_POLICY_PATH
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        base = Path(getattr(settings, "BASE_DIR", Path.cwd()))
+        p = base / p
+    return p.resolve()
+
+
+def _get_policy_path() -> Path:
+    p = _resolve_policy_path()
+    if not p.is_file():
+        raise FileNotFoundError(f"Policy file not found at {p}")
+    return p
+
+
+@lru_cache(maxsize=1)
+def get_policies() -> str:
+    return _get_policy_path().read_text()
+
+
+def import_from_path(path: str):
+    try:
+        module_path, attr = path.rsplit(".", 1)
+    except ValueError as e:
+        raise ImproperlyConfigured(
+            f"Invalid contributor path '{path}'. Expected 'some.module.ClassName'."
+        ) from e
+
+    module = importlib.import_module(module_path)
+    try:
+        return getattr(module, attr)
+    except AttributeError as e:
+        raise ImproperlyConfigured(
+            f"Contributor '{path}' not found (no attribute '{attr}' in "
+            f"'{module_path}')."
+        ) from e
+
+
+def _load_providers(setting_name: str) -> list[Any]:
+    paths = getattr(settings, setting_name, [])
+    if not isinstance(paths, (list, tuple)):
+        raise ImproperlyConfigured(f"{setting_name} must be a list/tuple.")
+    return [import_from_path(p)() for p in paths]
+
+
+@lru_cache(maxsize=1)
+def get_principal_attr_providers() -> list[Any]:
+    return _load_providers("CEDAR_PRINCIPAL_ATTRIBUTE_PROVIDERS")
+
+
+@lru_cache(maxsize=1)
+def get_context_providers() -> list[Any]:
+    return _load_providers("CEDAR_CONTEXT_PROVIDERS")
+
+
+_SETTING_CACHES = {
+    "CEDAR_POLICY_PATH": (get_policies,),
+    "BASE_DIR": (get_policies,),
+    "CEDAR_PRINCIPAL_ATTRIBUTE_PROVIDERS": (get_principal_attr_providers,),
+    "CEDAR_CONTEXT_PROVIDERS": (get_context_providers,),
+}
+
+
+def _clear_caches_on_setting_change(*, setting, **kwargs) -> None:
+    for fn in _SETTING_CACHES.get(setting, ()):
+        fn.cache_clear()
+
+
+setting_changed.connect(
+    _clear_caches_on_setting_change,
+    dispatch_uid="django_cedar.authz.clear_caches",
+)
+
+
+def create_authz() -> Authz:
+    return Authz(
+        policies=get_policies(),
+        principal_attribute_providers=get_principal_attr_providers(),
+        context_providers=get_context_providers(),
+    )
 
 
 class Authz:
