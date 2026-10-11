@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Refreshed the development lockfile (Django 6.0.8, sqlparse 0.6.0) and CI
+  action pins. No changes to the published package or its dependency
+  constraints.
+- Added `make bump` / `make release` targets for cutting releases.
+
 ## [0.2.0] - 2026-07-11
 
 ### Changed
