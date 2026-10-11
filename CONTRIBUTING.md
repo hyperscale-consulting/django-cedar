@@ -34,3 +34,20 @@ CI runs the full matrix (Python 3.12–3.14 × Django 5.2/6.0) on every PR.
 - Add tests for behavior changes.
 - Update `CHANGELOG.md` under `[Unreleased]`.
 - Keep the public API documented in `README.md`.
+
+## Releasing
+
+Releases are cut from `main` with the `Makefile` targets (requires `uv` and the
+GitHub CLI, `gh`):
+
+```bash
+make bump PART=patch   # or minor / major
+make release
+```
+
+`make bump` bumps the version in `pyproject.toml`, moves the `[Unreleased]`
+changelog entries under a dated `[X.Y.Z]` heading and commits. It refuses to
+run if `[Unreleased]` is empty. `make release` creates a signed `vX.Y.Z` tag,
+pushes `main` and the tag, and creates the GitHub release with that changelog
+section as its notes. Publishing the release triggers the PyPI upload
+(`.github/workflows/publish.yml`).
