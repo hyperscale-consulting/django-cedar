@@ -19,6 +19,7 @@
 - The converted exception is exactly `PermissionDenied("Forbidden")` — the same class and message `Authz.authorize()` raises.
 - Only `django.http.Http404` and `django.core.exceptions.ObjectDoesNotExist` are converted. Nothing else.
 - The conversion must raise; never fall back to `resource = None`.
+- Opt-out attribute is exactly `deny_missing_resource: bool = True` on `CedarAuthorizationMixin`; `False` re-raises the lookup exception untouched.
 - CHANGELOG entries go under `## [Unreleased]`; the version bump to 0.3.0 is done at release time with `make bump PART=minor`, not in this plan.
 - Commits are GPG-signed by the repo-local git config — do not change git config. End every commit message with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Tests use the existing idiom in `tests/test_views.py`: `@patch("django_cedar.views.create_authz")`, `RequestFactory` via the `rf` fixture, `_make_mock_user()`, `_make_anon_user()`, `_dispatch(view_class, request, **kwargs)`. No database. `template_name = "test.html"` on view classes (responses are lazy `TemplateResponse`s and are never rendered).
@@ -43,7 +44,7 @@
 
 **Interfaces:**
 - Consumes: existing `CedarAuthorizationMixin.get_resource(self, request) -> Any`.
-- Produces: `authorize_request(self, request) -> None` now raises `PermissionDenied("Forbidden")` when `get_resource()` raises `Http404` or `ObjectDoesNotExist`, before `create_authz()` is called. Task 2 relies on this: its end-to-end test expects the conversion to already exist.
+- Produces: `CedarAuthorizationMixin.deny_missing_resource: bool = True`; `authorize_request(self, request) -> None` now raises `PermissionDenied("Forbidden")` when `get_resource()` raises `Http404` or `ObjectDoesNotExist` and `deny_missing_resource` is true, before `create_authz()` is called. When false the lookup exception propagates. Task 2 relies on the conversion existing.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -52,7 +53,7 @@ Add to `tests/test_views.py` imports: `from django.core.exceptions import Multip
 ```python
 class TestMissingResource:
     @staticmethod
-    def _view_raising(exc):
+    def _view_raising(exc, **attrs):
         class RaisingView(CedarAuthorizationMixin, TemplateView):
             action_names = {"GET": "ViewObj"}
             template_name = "test.html"
@@ -60,6 +61,8 @@ class TestMissingResource:
             def get_resource(self, request):
                 raise exc
 
+        for name, value in attrs.items():
+            setattr(RaisingView, name, value)
         return RaisingView
 
     @pytest.mark.parametrize(
@@ -103,21 +106,35 @@ class TestMissingResource:
         with pytest.raises(type(exc)):
             _dispatch(self._view_raising(exc), request)
         mock_create_authz.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "exc", [Http404("gone"), ObjectDoesNotExist("gone")], ids=["http404", "doesnotexist"]
+    )
+    @patch("django_cedar.views.create_authz")
+    def test_opt_out_lets_lookup_error_propagate(self, mock_create_authz, rf, exc):
+        request = rf.get("/")
+        request.user = _make_mock_user()
+        view_class = self._view_raising(exc, deny_missing_resource=False)
+        with pytest.raises(type(exc)):
+            _dispatch(view_class, request)
+        mock_create_authz.assert_not_called()
 ```
 
 - [ ] **Step 2: Run the new tests to verify they fail**
 
 Run: `uv run pytest tests/test_views.py::TestMissingResource -v`
-Expected: all six cases FAIL. The four `missing_resource` cases raise `Http404`/`ObjectDoesNotExist` instead of `PermissionDenied`; the two `other_errors` cases fail on `assert_not_called()` because `create_authz()` currently runs before `get_resource()`.
+Expected: all eight cases FAIL. The four `missing_resource` cases raise `Http404`/`ObjectDoesNotExist` instead of `PermissionDenied`; the two `other_errors` and two `opt_out` cases fail on `assert_not_called()` because `create_authz()` currently runs before `get_resource()`.
 
 - [ ] **Step 3: Implement the conversion in `src/django_cedar/views.py`**
 
-Add imports `from django.core.exceptions import ObjectDoesNotExist`, `from django.core.exceptions import PermissionDenied`, `from django.http import Http404`. In `authorize_request()`, replace `resource = self.get_resource(request)` with:
+Add imports `from django.core.exceptions import ObjectDoesNotExist`, `from django.core.exceptions import PermissionDenied`, `from django.http import Http404`. Add the class attribute `deny_missing_resource: bool = True` next to `action_names`, and extend the class docstring with one sentence on it. In `authorize_request()`, replace `resource = self.get_resource(request)` with:
 
 ```python
 try:
     resource = self.get_resource(request)
 except (Http404, ObjectDoesNotExist) as exc:
+    if not self.deny_missing_resource:
+        raise
     logger.info(
         f"Authz denied: resource not found for action '{action}' "
         f"(user '{request.user}'): {exc}"
@@ -134,7 +151,7 @@ Expected: all tests PASS, no lint or type errors.
 
 - [ ] **Step 5: Document the behaviour**
 
-`README.md:87`: after "Denied requests raise `django.core.exceptions.PermissionDenied` (HTTP 403)." add a sentence: if `get_resource()` raises `django.http.Http404` or `django.core.exceptions.ObjectDoesNotExist`, the request is also answered with 403 rather than 404, so a denied principal cannot tell objects that exist from ones that don't. Misconfiguration errors (`AttributeError`, `MultipleObjectsReturned`) are not converted.
+`README.md:87`: after "Denied requests raise `django.core.exceptions.PermissionDenied` (HTTP 403)." add a sentence: if `get_resource()` raises `django.http.Http404` or `django.core.exceptions.ObjectDoesNotExist`, the request is also answered with 403 rather than 404, so a denied principal cannot tell objects that exist from ones that don't. Misconfiguration errors (`AttributeError`, `MultipleObjectsReturned`) are not converted. To keep the old behaviour on a particular view, set `deny_missing_resource = False` on it; the lookup exception then propagates unchanged.
 
 `README.md` custom-scoping example (line ~111): add a trailing comment on the `Project.objects.get(...)` line: `# missing project → 403, not 500`.
 
@@ -147,7 +164,8 @@ Expected: all tests PASS, no lint or type errors.
   now raises `PermissionDenied` (403) instead of surfacing as 404 or 500,
   so a denied principal can no longer enumerate which objects exist.
   Projects relying on 404 for missing objects in `Authorized*` views
-  should expect 403.
+  should expect 403, or set `deny_missing_resource = False` on the view
+  to keep the old behaviour.
 ```
 
 - [ ] **Step 6: Commit**
@@ -159,6 +177,7 @@ git commit -m "fix: answer 403 for missing objects in get_resource()
 A denied principal could distinguish objects that exist (403) from ones
 that don't (404) and enumerate ids. Http404 and ObjectDoesNotExist raised
 by get_resource() now become PermissionDenied before Cedar is consulted.
+Set deny_missing_resource = False on a view to opt out.
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```

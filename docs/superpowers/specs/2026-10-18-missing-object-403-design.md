@@ -24,7 +24,7 @@ object-resource mixin currently causes on every request.
 | Collapse direction | Missing → 403, not forbidden → 404. Matches the library's documented contract ("denied requests raise `PermissionDenied`"), keeps "you lack access" visible to legitimate users. RFC 9110 blesses the opposite collapse; both close the oracle. |
 | Where the conversion lives | `CedarAuthorizationMixin.authorize_request()`, around the `self.get_resource(request)` call — not in `ResourceIsCurrentObjectMixin`. This also covers custom `get_resource()` overrides (including the README's `Project.objects.get(...)` example, which today produces a 500) and the async dispatch path for free. |
 | Exceptions converted | `django.http.Http404` and `django.core.exceptions.ObjectDoesNotExist` only. `AttributeError` (no pk/slug in URLconf) and `MultipleObjectsReturned` are misconfiguration and stay loud. |
-| Opt-out hook | None (YAGNI). This is a security default; a project that wants 404 can override `authorize_request()`. |
+| Opt-out | Class attribute `deny_missing_resource: bool = True` on `CedarAuthorizationMixin`. Setting it to `False` on a view restores the pre-0.3.0 behaviour: the lookup exception propagates untouched (404 for Django's `get_object()`, 500 for a bare `DoesNotExist`). Default is the new, secure behaviour. Per-view only; no global setting. |
 | Admin special-casing | None. Cedar needs the resource to decide anything, so there is no principal for whom a missing object can safely be reported as 404. |
 | Duplicate `get_object()` | Collapsed by memoising in `ResourceIsCurrentObjectMixin.get_object()` for the default (`queryset=None`) call. |
 | Version | 0.3.0 (SemVer minor, pre-1.0): observable behaviour change (404 → 403) for consumers. |
@@ -33,12 +33,15 @@ object-resource mixin currently causes on every request.
 
 ### 1. Convert "not found" to "forbidden" during authorization
 
-In `CedarAuthorizationMixin.authorize_request()`:
+`CedarAuthorizationMixin` gains a class attribute `deny_missing_resource: bool = True`.
+In `authorize_request()`:
 
 ```python
 try:
     resource = self.get_resource(request)
 except (Http404, ObjectDoesNotExist) as exc:
+    if not self.deny_missing_resource:
+        raise
     logger.info(
         f"Authz denied: resource not found for action '{action}' "
         f"(user '{request.user}'): {exc}"
@@ -54,6 +57,9 @@ except (Http404, ObjectDoesNotExist) as exc:
 - The conversion must raise. It must never fall back to `resource = None`
   (`System::"global"`): a type-wide permit policy would then succeed for a
   nonexistent id, which is worse than the oracle being fixed.
+- With `deny_missing_resource = False` the `except` re-raises immediately: no
+  log line, no conversion, exactly the old behaviour. Cedar is still not
+  consulted, because there is no resource to consult it about.
 - Only the `get_resource()` call is wrapped. `authz.authorize()` and the
   `OPTIONS`/no-action early returns are untouched.
 - Because `_cedar_async_dispatch` calls the same `authorize_request()` via
@@ -123,6 +129,9 @@ In `TestCedarAuthorizationMixin` (or a new `TestMissingResource` class):
 4. A view whose `action_names` has no entry for the method (and no
    handler, so no `ImproperlyConfigured`) never calls `get_resource()`;
    this already holds, no new test required.
+4a. A view with `deny_missing_resource = False` whose `get_resource()`
+   raises `Http404` (and, parametrized, `ObjectDoesNotExist`) → the same
+   exception type propagates, `authorize` not called.
 
 In `TestResourceIsCurrentObjectMixin`:
 
@@ -146,7 +155,8 @@ No async-specific test is required: the conversion lives in the shared
   add that if `get_resource()` raises `Http404` or `ObjectDoesNotExist`
   the request is also answered with 403, so that a denied principal cannot
   distinguish objects that exist from ones that don't. Note that
-  misconfiguration errors are not converted.
+  misconfiguration errors are not converted. Document the opt-out: set
+  `deny_missing_resource = False` on a view to restore 404/propagation.
 - README custom-scoping example (`Project.objects.get(...)`): add a one-line
   comment that a missing project yields 403, not 500.
 - README mixin table/description for `ResourceIsCurrentObjectMixin`: note
@@ -156,13 +166,14 @@ No async-specific test is required: the conversion lives in the shared
     `ObjectDoesNotExist`) now raises `PermissionDenied` (403) instead of
     404/500, so a denied principal can no longer enumerate which objects
     exist. Projects relying on 404 for missing objects in `Authorized*`
-    views should expect 403."
+    views should expect 403, or set `deny_missing_resource = False` on
+    the view to keep the old behaviour."
   - **Changed**: "`ResourceIsCurrentObjectMixin` memoises `get_object()`
     so the object is fetched once per request instead of twice."
 
 ## Out of scope
 
-- Making the 403/404 choice configurable.
+- A project-wide setting for the opt-out (per-view attribute only).
 - Timing-channel mitigation.
 - Any change to `CurrentUserScopedMixin` (its queryset filter already
   yields a uniform 404 for "missing" and "not mine"; left as is).
