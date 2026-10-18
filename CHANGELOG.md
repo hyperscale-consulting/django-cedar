@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   action pins. No changes to the published package or its dependency
   constraints.
 - Added `make bump` / `make release` targets for cutting releases.
+- `ResourceIsCurrentObjectMixin` memoises `get_object()` so the object is
+  fetched once per request instead of twice (once for authorization, once
+  by the Django handler).
 
 ## [0.2.0] - 2026-07-11
 

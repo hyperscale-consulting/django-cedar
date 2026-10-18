@@ -102,7 +102,8 @@ exception then propagates unchanged.
 
 Compose the behavior yourself with `CedarAuthorizationMixin` plus:
 
-- `ResourceIsCurrentObjectMixin` — authorize against `self.get_object()`.
+- `ResourceIsCurrentObjectMixin` — authorize against `self.get_object()`; the
+  object is fetched once per request and reused by the view's handler.
 - `CurrentUserScopedMixin` — authorize against the current user and filter
   the queryset to `user=<request.user>`.
 - `AsyncLoginRequiredMixin` — a `LoginRequiredMixin` that works on async

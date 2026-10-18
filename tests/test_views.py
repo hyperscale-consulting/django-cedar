@@ -12,6 +12,7 @@ from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.http import HttpResponse
 from django.test import RequestFactory
+from django.views.generic import DetailView
 from django.views.generic import ListView
 from django.views.generic import TemplateView
 from django.views.generic import View
@@ -304,6 +305,34 @@ class TestMissingResource:
         mock_create_authz.assert_not_called()
 
 
+def _make_mock_queryset(obj=None, *, get_side_effect=None):
+    """A queryset mock that SingleObjectMixin.get_object() can drive.
+
+    Django's except clause evaluates ``queryset.model.DoesNotExist`` as an
+    exception class, so it must be a real one, not a MagicMock attribute.
+    """
+    qs = MagicMock()
+    qs.filter.return_value = qs
+    qs.model.DoesNotExist = ObjectDoesNotExist
+    qs.model._meta.verbose_name = "thing"
+    if get_side_effect is not None:
+        qs.get.side_effect = get_side_effect
+    else:
+        qs.get.return_value = obj
+    return qs
+
+
+class _DetailWithQueryset(
+    ResourceIsCurrentObjectMixin, CedarAuthorizationMixin, DetailView
+):
+    action_names = {"GET": "ViewObj"}
+    template_name = "test.html"
+    mock_queryset: Any = None
+
+    def get_queryset(self):
+        return self.mock_queryset
+
+
 class TestResourceIsCurrentObjectMixin:
     @patch("django_cedar.views.create_authz")
     def test_get_resource_returns_object(self, mock_create_authz, rf):
@@ -353,6 +382,69 @@ class TestResourceIsCurrentObjectMixin:
         _dispatch(ObjView, request)
 
         assert captured_view["object"] is mock_obj
+
+    @patch("django_cedar.views.create_authz")
+    def test_get_object_is_called_once_per_request(self, mock_create_authz, rf):
+        mock_authz = MagicMock()
+        mock_create_authz.return_value = mock_authz
+        obj = MagicMock()
+        captured = {}
+
+        class V(_DetailWithQueryset):
+            mock_queryset = _make_mock_queryset(obj)
+
+            def get(self, request, *args, **kwargs):
+                response = super().get(request, *args, **kwargs)
+                captured["object"] = self.object
+                return response
+
+        request = rf.get("/")
+        request.user = _make_mock_user()
+        _dispatch(V, request, pk=1)
+
+        V.mock_queryset.get.assert_called_once()
+        assert captured["object"] is obj
+        mock_authz.authorize.assert_called_once_with(request.user, "ViewObj", obj)
+
+    @patch("django_cedar.views.create_authz")
+    def test_missing_row_raises_permission_denied_end_to_end(
+        self, mock_create_authz, rf
+    ):
+        class V(_DetailWithQueryset):
+            mock_queryset = _make_mock_queryset(get_side_effect=ObjectDoesNotExist())
+
+        request = rf.get("/")
+        request.user = _make_mock_user()
+        with pytest.raises(PermissionDenied):
+            _dispatch(V, request, pk=1)
+        mock_create_authz.assert_not_called()
+
+    def test_explicit_queryset_bypasses_memo(self):
+        view: Any = _DetailWithQueryset()
+        view.kwargs = {"pk": 1}
+        explicit = _make_mock_queryset(MagicMock())
+
+        view.get_object(explicit)
+        view.get_object(explicit)
+
+        assert explicit.get.call_count == 2
+
+    def test_memo_is_per_instance(self):
+        qs = _make_mock_queryset(MagicMock())
+
+        class V(_DetailWithQueryset):
+            mock_queryset = qs
+
+        first: Any = V()
+        first.kwargs = {"pk": 1}
+        second: Any = V()
+        second.kwargs = {"pk": 1}
+
+        first.get_object()
+        first.get_object()
+        second.get_object()
+
+        assert qs.get.call_count == 2
 
 
 class TestCurrentUserScopedMixin:

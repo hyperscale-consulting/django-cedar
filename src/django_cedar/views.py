@@ -116,15 +116,30 @@ class CedarAuthorizationMixin:
         return None
 
 
+_UNSET = object()
+
+
 class ResourceIsCurrentObjectMixin:
     """Use ``self.get_object()`` as the Cedar resource.
 
     For detail/update/delete views where the resource being authorized is the
-    object being acted on.
+    object being acted on. ``get_object()`` is called once per request: the
+    instance fetched for authorization is memoised and reused by the view's
+    handler.
     """
 
+    _cedar_object: Any = _UNSET
+
+    def get_object(self, queryset: Any = None) -> Any:
+        if queryset is None and self._cedar_object is not _UNSET:
+            return self._cedar_object
+        obj = cast(Any, super()).get_object(queryset)
+        if queryset is None:
+            self._cedar_object = obj
+        return obj
+
     def get_resource(self, request) -> Any:
-        self.object = cast(Any, self).get_object()
+        self.object = self.get_object()
         return self.object
 
 
