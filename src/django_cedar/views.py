@@ -7,6 +7,9 @@ from typing import cast
 from asgiref.sync import sync_to_async
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
 from django.views.generic import CreateView
 from django.views.generic import DeleteView
 from django.views.generic import DetailView
@@ -28,6 +31,12 @@ class CedarAuthorizationMixin:
     strings.  Override ``get_resource`` to control the Cedar resource used for
     the authorization check (defaults to ``None`` → ``System::"global"``).
 
+    If ``get_resource`` raises ``Http404`` or ``ObjectDoesNotExist`` the
+    request is denied with ``PermissionDenied`` (403) rather than answering
+    404, so a denied principal cannot tell objects that exist from ones that
+    don't. Set ``deny_missing_resource = False`` on a view to let the lookup
+    exception propagate instead.
+
     Usage::
 
         class MyView(LoginRequiredMixin, CedarAuthorizationMixin, DetailView):
@@ -41,6 +50,7 @@ class CedarAuthorizationMixin:
     """
 
     action_names: dict[str, str] = {}
+    deny_missing_resource: bool = True
 
     def dispatch(self, request, *args, **kwargs) -> Any:  # type: ignore[override]
         if self.view_is_async:  # type: ignore[attr-defined]
@@ -81,8 +91,17 @@ class CedarAuthorizationMixin:
                     f"for this method."
                 )
             return
+        try:
+            resource = self.get_resource(request)
+        except (Http404, ObjectDoesNotExist) as exc:
+            if not self.deny_missing_resource:
+                raise
+            logger.info(
+                f"Authz denied: resource not found for action '{action}' "
+                f"(user '{request.user}'): {exc}"
+            )
+            raise PermissionDenied("Forbidden") from exc
         authz = create_authz()
-        resource = self.get_resource(request)
         logger.debug(
             f"Authorizing action '{action}' on resource '{resource}' "
             f"for user '{request.user}'"

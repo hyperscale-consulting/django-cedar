@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- A missing object in `get_resource()` (`Http404` or `ObjectDoesNotExist`)
+  now raises `PermissionDenied` (403) instead of surfacing as 404 or 500,
+  so a denied principal can no longer enumerate which objects exist.
+  Projects relying on 404 for missing objects in `Authorized*` views
+  should expect 403, or set `deny_missing_resource = False` on the view
+  to keep the old behaviour.
+
 ### Changed
 
 - Refreshed the development lockfile (Django 6.0.8, sqlparse 0.6.0) and CI

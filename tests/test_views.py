@@ -6,7 +6,10 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import MultipleObjectsReturned
+from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import PermissionDenied
+from django.http import Http404
 from django.http import HttpResponse
 from django.test import RequestFactory
 from django.views.generic import ListView
@@ -222,6 +225,83 @@ class TestCedarAuthorizationMixin:
         _dispatch(MultiMethodView, request)
 
         mock_authz.authorize.assert_called_once_with(request.user, "UpdatePage", None)
+
+
+class TestMissingResource:
+    @staticmethod
+    def _view_raising(exc, **attrs):
+        class RaisingView(CedarAuthorizationMixin, TemplateView):
+            action_names = {"GET": "ViewObj"}
+            template_name = "test.html"
+
+            def get_resource(self, request):
+                raise exc
+
+        for name, value in attrs.items():
+            setattr(RaisingView, name, value)
+        return RaisingView
+
+    @pytest.mark.parametrize(
+        "exc",
+        [Http404("gone"), ObjectDoesNotExist("gone")],
+        ids=["http404", "doesnotexist"],
+    )
+    @patch("django_cedar.views.create_authz")
+    def test_missing_resource_raises_permission_denied(
+        self, mock_create_authz, rf, exc
+    ):
+        request = rf.get("/")
+        request.user = _make_mock_user()
+        with pytest.raises(PermissionDenied):
+            _dispatch(self._view_raising(exc), request)
+        mock_create_authz.assert_not_called()
+
+    @patch("django_cedar.views.create_authz")
+    def test_missing_resource_for_anonymous_user_raises_permission_denied(
+        self, mock_create_authz, rf
+    ):
+        request = rf.get("/")
+        request.user = _make_anon_user()
+        with pytest.raises(PermissionDenied):
+            _dispatch(self._view_raising(Http404("gone")), request)
+        mock_create_authz.assert_not_called()
+
+    @patch("django_cedar.views.create_authz")
+    def test_missing_resource_on_head_raises_permission_denied(
+        self, mock_create_authz, rf
+    ):
+        request = rf.head("/")
+        request.user = _make_mock_user()
+        with pytest.raises(PermissionDenied):
+            _dispatch(self._view_raising(Http404("gone")), request)
+        mock_create_authz.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "exc",
+        [AttributeError("no pk or slug"), MultipleObjectsReturned("two")],
+        ids=["attributeerror", "multipleobjectsreturned"],
+    )
+    @patch("django_cedar.views.create_authz")
+    def test_other_errors_propagate_unchanged(self, mock_create_authz, rf, exc):
+        request = rf.get("/")
+        request.user = _make_mock_user()
+        with pytest.raises(type(exc)):
+            _dispatch(self._view_raising(exc), request)
+        mock_create_authz.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "exc",
+        [Http404("gone"), ObjectDoesNotExist("gone")],
+        ids=["http404", "doesnotexist"],
+    )
+    @patch("django_cedar.views.create_authz")
+    def test_opt_out_lets_lookup_error_propagate(self, mock_create_authz, rf, exc):
+        request = rf.get("/")
+        request.user = _make_mock_user()
+        view_class = self._view_raising(exc, deny_missing_resource=False)
+        with pytest.raises(type(exc)):
+            _dispatch(view_class, request)
+        mock_create_authz.assert_not_called()
 
 
 class TestResourceIsCurrentObjectMixin:

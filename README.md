@@ -85,6 +85,13 @@ Every request is authorized in `dispatch()`. The Cedar request is built as:
   `<ModelClass>::"<pk>"`; `System::"global"` when there is no resource.
 
 Denied requests raise `django.core.exceptions.PermissionDenied` (HTTP 403).
+If `get_resource()` raises `django.http.Http404` or
+`django.core.exceptions.ObjectDoesNotExist`, the request is also answered
+with 403 rather than 404, so a denied principal cannot tell objects that
+exist from ones that don't. Misconfiguration errors (`AttributeError`,
+`MultipleObjectsReturned`) are not converted. To keep the old behaviour on a
+particular view, set `deny_missing_resource = False` on it; the lookup
+exception then propagates unchanged.
 
 ## Views and mixins
 
@@ -108,7 +115,7 @@ class ProjectScopedView(CedarAuthorizationMixin, ListView):
     action_names = {"GET": "ListTasks"}
 
     def get_resource(self, request):
-        return Project.objects.get(pk=self.kwargs["project_pk"])
+        return Project.objects.get(pk=self.kwargs["project_pk"])  # missing project → 403, not 500
 ```
 
 ## Exposing model attributes to policies
