@@ -10,9 +10,18 @@ if TYPE_CHECKING:
     from django_cedar.authz import Authz
     from django_cedar.authz import create_authz
     from django_cedar.authz import Entity
+    from django_cedar.authz import entity_ref
     from django_cedar.authz import EntityRef
+    from django_cedar.authz import ForbidPolicyError
 
-__all__: list[str] = ["Authz", "Entity", "EntityRef", "create_authz"]
+__all__: list[str] = [
+    "Authz",
+    "Entity",
+    "EntityRef",
+    "ForbidPolicyError",
+    "create_authz",
+    "entity_ref",
+]
 
 # PEP 562 lazy exports: Django imports this package during app loading, when
 # models are not yet ready — so django_cedar.authz (which imports auth models)

@@ -76,8 +76,9 @@ Every request is authorized in `dispatch()`. The Cedar request is built as:
   `is_superuser` attributes and `Group::"<name>"` parent entities from your
   model's `groups` relation are included when your model provides them, so
   `principal in Group::"editors"` works out of the box for models that have
-  one. Policies — including `forbid` policies — that reference an attribute
-  your model doesn't provide never apply.
+  one. A policy that references an attribute or entity the request doesn't
+  supply errors, and Cedar skips it; for a `forbid` that means the request
+  is *not* denied. See [When a policy errors](#when-a-policy-errors).
 - **action** — `Action::"<name>"` from the view's `action_names` mapping
   (HTTP method → action name). HEAD requests are authorized using the view's
   `"GET"` action mapping; a `"HEAD"` key in `action_names` is not consulted.
@@ -141,13 +142,117 @@ permit(principal, action == Action::"CloseTask", resource is Task)
 when { resource.status == "open" };
 ```
 
+## Multi-hop attribute paths
+
+Policies can follow references any number of hops, on either side of the
+request:
+
+```cedar
+forbid(principal, action, resource is Report)
+when { resource.period.organisation.billing_status == "suspended" };
+
+permit(principal, action == Action::"ApproveReport", resource is Report)
+when { principal.profile.organisation == resource.period.organisation };
+```
+
+Each hop needs two things: an attribute holding an entity reference
+(`entity_ref(obj)` builds one), and the referenced model reaching the request
+so Cedar can read its attributes.
+
+**Resource side.** Each model returns its references from `authz_fields()`
+and the models behind them from `authz_related_entities()`. django-cedar
+follows these transitively, so every model on the path declares its own next
+hop:
+
+```python
+from django_cedar import entity_ref
+
+
+class Report(models.Model):
+    def authz_fields(self):
+        return {"period": entity_ref(self.period)}
+
+    def authz_related_entities(self):
+        return [self.period]
+
+
+class ReportingPeriod(models.Model):
+    def authz_fields(self):
+        return {"organisation": entity_ref(self.organisation)}
+
+    def authz_related_entities(self):
+        return [self.organisation]
+
+
+class Organisation(models.Model):
+    def authz_fields(self):
+        return {"billing_status": self.billing_status}
+```
+
+**Principal side.** A principal attribute provider adds the first hop as an
+attribute and returns the model behind it from `get_entities()`. Models
+returned there are walked exactly like resources, so from `Profile` onwards
+the models' own `authz_fields()` / `authz_related_entities()` take over:
+
+```python
+class ProfileProvider:
+    def get_attributes(self, user):
+        return {"profile": entity_ref(user.profile)}
+
+    def get_entities(self, user):
+        return [user.profile]  # Profile -> Organisation -> ... are followed
+```
+
+`get_entities()` may also return hand-built `Entity` objects, as before;
+they're used as-is and not walked. A provider can return both.
+
+The principal and resource walks share one record of what they've visited:
+cycles (A → B → A) stop, a model reached from both sides is built once, and
+a chain that reaches a user (`resource.owner.profile...`) carries on through
+the principal attribute providers for that user.
+
+**Duplicates.** When the same entity arrives by more than one route (for
+example a provider's hand-built `Organisation` and the resource walk's
+`Organisation` model), the copies are merged: attributes merge recursively
+through records, and parents are unioned. If two copies give the same
+attribute different values, the first value wins and a warning names the
+entity type and attribute. Entities arrive in this order: hand-built `Entity`
+objects from providers (in provider order), the principal and its groups,
+the principal's related models, then the resource walk. So a hand-built
+entity keeps every value it set, as in 0.3.0, and the models only add the
+attributes it lacks.
+
+## When a policy errors
+
+If evaluating a policy errors — an attribute or entity on its path isn't in
+the request, or a value has the wrong type — Cedar skips that policy. For a
+`permit` that only means it doesn't allow. For a `forbid` the request is
+**allowed** when it should have been denied. The usual cause is a model on a
+multi-hop path that doesn't declare its next hop.
+
+django-cedar logs every skipped policy at `ERROR` level on the
+`django_cedar.authz` logger, with Cedar's policy id (`policy0`, `policy1`, …
+in file order), its effect, its `@id("...")` annotation if it has one, the
+action, and the reason with entity ids and string values redacted.
+
+With `CEDAR_RAISE_ON_FORBID_ERROR` on, a skipped `forbid` also raises
+`django_cedar.ForbidPolicyError`. It isn't a `PermissionDenied`, so it
+surfaces as a server error rather than passing for an ordinary 403. It's on
+by default when `DEBUG` is true and under Django's test runner or
+pytest-django, so tests fail loudly instead of allowing. Turn it on in
+production to fail closed (a 500 instead of an allow), or set it to `False`
+to keep Cedar's skip-and-log behaviour everywhere. Guard optional attributes
+with `has` (`resource has archived && resource.archived`) so that a
+missing attribute is a policy decision, not an error.
+
 ## Settings
 
 | Setting | Required | Description |
 |---|---|---|
 | `CEDAR_POLICY_PATH` | yes | Path to the Cedar policy file. Relative paths resolve against `BASE_DIR`. |
-| `CEDAR_PRINCIPAL_ATTRIBUTE_PROVIDERS` | no | List of dotted paths to classes with `get_attributes(user) -> dict` (extra principal attributes) and optionally `get_entities(user) -> iterable[Entity]` (extra entities). |
+| `CEDAR_PRINCIPAL_ATTRIBUTE_PROVIDERS` | no | List of dotted paths to classes with `get_attributes(user) -> dict` (extra principal attributes) and optionally `get_entities(user)`, returning an iterable of `Entity` objects (used as-is) and/or model instances (walked like resources; see [Multi-hop attribute paths](#multi-hop-attribute-paths)). |
 | `CEDAR_CONTEXT_PROVIDERS` | no | List of dotted paths to classes with `get_context(user, action, resource) -> dict`. Results are deep-merged into the Cedar request context in list order; a per-call `context=` argument merges last and wins. |
+| `CEDAR_RAISE_ON_FORBID_ERROR` | no | Raise `ForbidPolicyError` when a `forbid` policy errors during evaluation instead of letting Cedar skip it. Defaults to on under `DEBUG` and test runners, off otherwise. See [When a policy errors](#when-a-policy-errors). |
 
 Example context provider:
 
@@ -165,6 +270,9 @@ from django_cedar import create_authz
 authz = create_authz()  # loads policies + providers from settings (cached)
 authz.authorize(request.user, "ExportReport", report)  # raises PermissionDenied on deny
 ```
+
+`Authz(..., raise_on_forbid_error=True)` overrides `CEDAR_RAISE_ON_FORBID_ERROR`
+for one engine.
 
 ## System checks
 

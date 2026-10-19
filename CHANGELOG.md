@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Policies that error during evaluation are no longer silent. Cedar skips a
+  policy whose evaluation errors (for example, a model on an attribute path
+  that doesn't declare its next hop), and a skipped `forbid` *allows* the
+  request. Every skipped policy is now logged at `ERROR` with its policy id,
+  effect and `@id`, with entity ids and values redacted.
+- New `CEDAR_RAISE_ON_FORBID_ERROR` setting: when on, a skipped `forbid`
+  raises `ForbidPolicyError` (not a `PermissionDenied` subclass) instead of
+  allowing. **On by default under `DEBUG` and test runners**, so test suites
+  with a `forbid` that errors — including one that reads an attribute the
+  user model doesn't have, which the README previously described as "never
+  applies" — will now fail. Fix the policy or model (or guard with `has`),
+  or set the setting to `False` to keep the old behaviour. Off by default
+  otherwise; turning it on in production fails closed.
+
+### Added
+
+- Principal-side attribute paths of any depth, e.g.
+  `principal.profile.organisation.billing_status`. A principal attribute
+  provider's `get_entities(user)` may now return model instances as well as
+  `Entity` objects; models are walked through `authz_fields()` /
+  `authz_related_entities()` exactly like resources. Providers that return
+  `Entity` objects work unchanged.
+- `entity_ref(obj)` builds the Cedar entity reference for an attribute that
+  points at another model (or user).
+- `Authz(raise_on_forbid_error=...)` overrides the setting for one engine.
+
+### Changed
+
+- The principal and resource walks share one visited set: a model reached
+  from both sides is built once, a cycle through the principal stops, and a
+  resource chain that reaches the requesting user no longer re-runs the
+  principal attribute providers.
+- When the same entity arrives by more than one route its copies are merged
+  (attributes recursively, parents unioned) instead of the first copy being
+  kept whole. On a conflicting value the first wins, with a warning; the
+  order is hand-built provider entities, the principal and groups, the
+  principal's related models, then the resource walk. Values 0.3.0 produced
+  are unchanged; previously dropped attributes are now present.
+- The debug-level log of Cedar diagnostics on deny is replaced by the
+  error-level per-policy log above.
+
 ## [0.3.0] - 2026-10-18
 
 ### Security
