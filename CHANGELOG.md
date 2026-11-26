@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A request for a method the view leaves out of `http_method_names` is now
+  answered 405, as Django intends, instead of raising `ImproperlyConfigured`
+  (a 500) when the class happens to have a handler for it. `FormView`,
+  `CreateView` and `UpdateView` all inherit `put()`, so restricting one to
+  GET and POST made every PUT a 500. Such requests are no longer
+  authorized either, since nothing is dispatched.
+
 ## [0.4.0] - 2026-10-19
 
 ### Security

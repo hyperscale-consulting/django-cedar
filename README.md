@@ -82,6 +82,10 @@ Every request is authorized in `dispatch()`. The Cedar request is built as:
 - **action** — `Action::"<name>"` from the view's `action_names` mapping
   (HTTP method → action name). HEAD requests are authorized using the view's
   `"GET"` action mapping; a `"HEAD"` key in `action_names` is not consulted.
+  A method the view has a handler for but no `action_names` entry raises
+  `ImproperlyConfigured`, so it cannot run unauthorized. A method left out
+  of the view's `http_method_names` is not checked at all: Django answers
+  it 405 before any handler runs.
 - **resource** — the object returned by the view's `get_resource()` hook, as
   `<ModelClass>::"<pk>"`; `System::"global"` when there is no resource.
 

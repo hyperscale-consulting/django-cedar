@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import MultipleObjectsReturned
 from django.core.exceptions import ObjectDoesNotExist
@@ -16,6 +17,7 @@ from django.views.generic import DetailView
 from django.views.generic import ListView
 from django.views.generic import TemplateView
 from django.views.generic import View
+from django.views.generic.edit import FormView
 
 from django_cedar.views import CedarAuthorizationMixin
 from django_cedar.views import CurrentUserScopedMixin
@@ -175,6 +177,40 @@ class TestCedarAuthorizationMixin:
         request.user = _make_mock_user()
         with pytest.raises(ImproperlyConfigured, match="post.*handler.*action_names"):
             _dispatch(BadView, request)
+
+    @patch("django_cedar.views.create_authz")
+    def test_method_not_in_http_method_names_returns_405_despite_handler(
+        self, mock_create_authz, rf
+    ):
+        # FormView inherits put(); a view that leaves "put" out of
+        # http_method_names never dispatches it, so Django's 405 must win
+        # over the unmapped-handler guard.
+        class PostOnlyFormView(CedarAuthorizationMixin, FormView):
+            action_names = {"GET": "ViewPage", "POST": "SubmitPage"}
+            http_method_names = ["get", "post", "head", "options"]
+            form_class = forms.Form
+            template_name = "test.html"
+
+        request = rf.put("/")
+        request.user = _make_mock_user()
+        response = _dispatch(PostOnlyFormView, request)
+        assert response.status_code == 405
+        mock_create_authz.assert_not_called()
+
+    @patch("django_cedar.views.create_authz")
+    def test_head_not_in_http_method_names_returns_405_without_auth(
+        self, mock_create_authz, rf
+    ):
+        class GetOnlyView(CedarAuthorizationMixin, TemplateView):
+            action_names = {"GET": "ViewPage"}
+            http_method_names = ["get"]
+            template_name = "test.html"
+
+        request = rf.head("/")
+        request.user = _make_mock_user()
+        response = _dispatch(GetOnlyView, request)
+        assert response.status_code == 405
+        mock_create_authz.assert_not_called()
 
     @patch("django_cedar.views.create_authz")
     def test_anonymous_user_still_authorized(self, mock_create_authz, rf):

@@ -70,6 +70,12 @@ class CedarAuthorizationMixin:
         method = request.method.upper()
         if method == "OPTIONS":
             return
+        # A method the view doesn't serve is never dispatched: Django answers
+        # 405 whatever handlers the class has (FormView inherits put(), for
+        # one). Nothing runs, so there is nothing to authorize, and the
+        # unmapped-handler guard below must not turn that 405 into a 500.
+        if method.lower() not in self.http_method_names:  # type: ignore[attr-defined]
+            return
         # Keep the original method's handler name for the fail-closed guard
         # below: a view may define a custom head() with no get() at all, and
         # that handler must still be caught by the guard even though the
